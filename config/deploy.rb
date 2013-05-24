@@ -1,34 +1,147 @@
-require "bundler/capistrano"
-require "fast_git_deploy/enable"
-
-set :application, "testviet"
-set :repository, "git@github.com:dangluan/testviet.git"
-
-set :user, 'vagrant'
-set :use_sudo, false
-set :deploy_type, :deploy
-set :branch, 'master'
+require 'bundler/capistrano'
+require 'capistrano/ext/multistage'
 
 default_run_options[:pty] = true
-ssh_option[:forward_agent] = true
-ssh_option[:keys] = [File.join(ENV["HOME"], '.vagrant.d', 'insecure_private_key')]
+set :keep_releases, 5
+set :application, "HP Star"
+set :repository,  "git@github.com:dangluan/testviet.git"
+set :scm, :git
+set :rake,  "bundle exec rake"
+set :stages, ["staging", "production"]
+set :default_stage, "staging"
+set :use_sudo,	false
+set :deploy_via, :remote_cache
+set :rake,  "bundle exec rake"
+# if you're still using the script/reaper helper you will need
+# these http://github.com/rails/irs_process_scripts
 
-role :app, "testviet.vn"
-role :web, "testviet.vn"
-role :db, "testviet.vn"
+load 'deploy/assets'
 
-after "deploy:setup" do
-  deploy.fast_git_setup.clone_repository
-  run "cd #{current_path} && bundle install"
-end
+after 'deploy:finalize_update', 'deploy:symlink_share', 'deploy:migrate_database'
+after "deploy:update", "deploy:cleanup"
+# before 'deploy:update_code', 'thinking_sphinx:stop'
+# after 'deploy:update_code', 'thinking_sphinx:start'
+# after  "deploy:restart", "delayed_job:restart"
 
-namespace :unicorn do
-  desc "start unicorn"
-  task :start do
-    run "cd #{current_path} && bundle exec unicorn -c /etc/unicorn/testviet.conf.rb -D"
-  end
+def remote_file_exists?(full_path)
+  'true' ==  capture("if [ -e #{full_path} ]; then echo 'true'; fi").strip
 end
 
 namespace :deploy do
-  task :create_symlink do; end
+  desc "Zero-downtime restart of Unicorn"  
+  task :restart, :roles => :web do
+    if remote_file_exists?("#{shared_path}/pids/hpstar.pid")
+      run "kill -s QUIT `cat #{shared_path}/pids/hpstar.pid`"
+    end
+    run "cd #{current_path} ; bundle exec unicorn -c config/unicorn.rb -D -E #{rails_env}"
+  end
+  
+  desc "Start unicorn"
+  task :start, :except => { :no_release => true } do
+    run "cd #{current_path} ; bundle exec unicorn -c config/unicorn.rb -D -E #{rails_env}"
+    # run "cd #{current_path}; touch tmp/restart.txt"
+  end
+
+  desc "Stop unicorn"
+  task :stop, :except => { :no_release => true } do
+    run "kill -s QUIT `cat #{shared_path}/pids/hpstar.pid`"
+  end  
+    
+  namespace :assets do
+    task :precompile do            
+      if !(ENV["SKIP_ASSET"] == "true")        
+        run_locally "bundle exec rake assets:precompile RAILS_ENV=#{rails_env}"
+        run_locally "cd public; tar -zcvf assets.tar.gz assets"
+        top.upload "public/assets.tar.gz", "#{shared_path}", :via => :scp
+        run "cd #{shared_path}; tar -zxvf assets.tar.gz"
+        run_locally "rm public/assets.tar.gz"
+        run_locally "rm -rf public/assets"
+        run "rm -rf #{latest_release}/public/assets"
+        run "ln -s #{shared_path}/assets #{latest_release}/public/assets"
+        run "rm -rf #{shared_path}/assets.tar.gz"
+      end
+    end
+  end
+    
+  desc 'migrate database'
+  task :migrate_database do
+    begin
+      run "cd #{release_path} && RAILS_ENV=#{rails_env} #{rake} db:migrate"
+    rescue => e
+    end
+  end
+      
+  desc 'Symlink share'
+  task :symlink_share do
+    ## Link System folder 
+    run "mkdir -p #{shared_path}/system"
+    run "ln -nfs #{shared_path}/system #{release_path}/public/system"
+    
+    ## Link Database file
+    run "rm -f #{release_path}/config/database.yml"    
+    run "ln -nfs #{shared_path}/config/database.yml #{release_path}/config/database.yml"
+    
+    ## Copy file to the shared locales folder
+    # run "mkdir -p #{shared_path}/config/locales"
+    # run "cp #{release_path}/config/locales/devise.en.yml #{shared_path}/config/locales"
+    # run "cp #{release_path}/config/locales/dynamic_form.en.yml #{shared_path}/config/locales"
+    # run "cp #{release_path}/config/locales/en.yml #{shared_path}/config/locales"
+    # run "cp #{release_path}/config/locales/rubify_dashboard.en.yml #{shared_path}/config/locales"
+    ## Remove locales folder and link it back from shared locales
+    # run "rm -rf #{release_path}/config/locales"
+    # run "ln -nfs #{shared_path}/config/locales #{release_path}/config/locales"
+    
+    ## link sale tools folder
+    # run "mkdir -p #{shared_path}/sale_tools"
+    # run "rm -rf #{release_path}/public/sale_tools"
+    # run "ln -nfs #{shared_path}/sale_tools #{release_path}/public/sale_tools"
+  end
+  
+  namespace :web do
+    desc "Present a maintenance page to visitors."
+    task :disable, :roles => :web, :except => { :no_release => true } do
+      require 'erb'
+      on_rollback { run "rm #{shared_path}/system/maintenance.html" }
+
+      reason = ENV['REASON']
+      deadline = ENV['UNTIL']
+
+      template = File.read("./app/views/layouts/maintenance.html.erb")
+      result = ERB.new(template).result(binding)
+
+      put result, "#{shared_path}/system/maintenance.html", :mode => 0644
+    end
+    
+    desc "Disable maintenance mode"
+    task :enable, :roles => :web do
+      run "rm -f #{shared_path}/system/maintenance.html"
+    end
+  end
 end
+
+# namespace :sphinx do
+#   task :symlink_indexes, :roles => [:app] do
+#     run "mkdir -p #{shared_path}/sphinx"
+#     run "ln -nfs #{shared_path}/sphinx #{release_path}/db/sphinx"
+#   end
+# end
+# 
+# namespace :delayed_job do
+#   desc "Start delayed_job process"
+#   task :start do
+#     p "Starting Delayed Job"
+#     run "cd #{current_path} && RAILS_ENV=#{rails_env} script/delayed_job start"
+#   end
+# 
+#   desc "Stop delayed_job process"
+#   task :stop do
+#     p "Stopping Delayed Job"
+#     run "cd #{current_path} && RAILS_ENV=#{rails_env} script/delayed_job stop"
+#   end
+# 
+#   desc "Restart delayed_job process"
+#   task :restart do
+#     p "Restarting Delayed Job"
+#     run "cd #{current_path} && RAILS_ENV=#{rails_env} script/delayed_job restart"
+#   end
+# end
