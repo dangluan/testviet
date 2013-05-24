@@ -1,5 +1,7 @@
 require 'bundler/capistrano'
 require 'capistrano/ext/multistage'
+require "capistrano-rbenv"
+
 
 default_run_options[:pty] = true
 set :keep_releases, 5
@@ -12,6 +14,7 @@ set :default_stage, "staging"
 set :use_sudo,	false
 set :deploy_via, :remote_cache
 set :rake,  "bundle exec rake"
+set :rbenv_ruby_version, "1.9.3-p327"
 # if you're still using the script/reaper helper you will need
 # these http://github.com/rails/irs_process_scripts
 
