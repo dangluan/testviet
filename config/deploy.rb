@@ -30,8 +30,8 @@ end
 namespace :deploy do
   desc "Zero-downtime restart of Unicorn"  
   task :restart, :roles => :web do
-    if remote_file_exists?("#{shared_path}/pids/hpstar.pid")
-      run "kill -s QUIT `cat #{shared_path}/pids/hpstar.pid`"
+    if remote_file_exists?("#{shared_path}/pids/testviet.pid")
+      run "kill -s QUIT `cat #{shared_path}/pids/testviet.pid`"
     end
     run "cd #{current_path} ; bundle exec unicorn -c config/unicorn.rb -D -E #{rails_env}"
   end
@@ -44,7 +44,7 @@ namespace :deploy do
 
   desc "Stop unicorn"
   task :stop, :except => { :no_release => true } do
-    run "kill -s QUIT `cat #{shared_path}/pids/hpstar.pid`"
+    run "kill -s QUIT `cat #{shared_path}/pids/testviet.pid`"
   end  
     
   namespace :assets do
