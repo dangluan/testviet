@@ -5,7 +5,7 @@ require 'capistrano/ext/multistage'
 
 default_run_options[:pty] = true
 set :keep_releases, 5
-set :application, "HP Star"
+set :application, "TEST VN"
 set :repository,  "git@github.com:dangluan/testviet.git"
 set :scm, :git
 set :rake,  "bundle exec rake"
