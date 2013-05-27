@@ -35,7 +35,7 @@ namespace :deploy do
   task :restart, :roles => :web do
     if remote_file_exists?("#{shared_path}/pids/testviet.pid")
       text = capture("cat #{shared_path}/pids/testviet.pid")
-      run "kill -s QUIT `cat #{shared_path}/pids/testviet.pid`" if text == nil || text == ""
+      run "kill -s QUIT `cat #{shared_path}/pids/testviet.pid`" if text.nil? == false
     end
     run "cd #{current_path} ; bundle exec unicorn -c config/unicorn.rb -D -E #{rails_env}"
   end
